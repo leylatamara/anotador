@@ -204,12 +204,16 @@
             const [overtimeEntries, setOvertimeEntries] = useState([]);
             const [showUnpaidOnly, setShowUnpaidOnly] = useState(false);
             const [filterDate, setFilterDate] = useState('');
+            const [filterEndDate, setFilterEndDate] = useState('');
             const [searchQuery, setSearchQuery] = useState('');
             const [activeTab, setActiveTab] = useState('add');
             const [message, setMessage] = useState({ text: '', type: '' });
             const [editingEntry, setEditingEntry] = useState(null);
             const [hourlyRate, setHourlyRate] = useState(0);
             const [nightlyPercentage, setNightlyPercentage] = useState(20);
+            const [sortBy, setSortBy] = useState('date');
+            const [sortDirection, setSortDirection] = useState('desc');
+            const [showNightShiftOnly, setShowNightShiftOnly] = useState(false);
             
             const updateNightlyPercentageInDb = async (newPercentage) => {
                 if (!db || !user) return;
@@ -253,10 +257,7 @@
                 });
 
                 const overtimeCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/overtime_entries`);
-                let q = query(overtimeCollectionRef);
-                if (showUnpaidOnly) {
-                    q = query(overtimeCollectionRef, where("isPaid", "==", false));
-                }
+                const q = query(overtimeCollectionRef);
                 const unsubscribeEntries = onSnapshot(q, (snapshot) => {
                     const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     entries.sort((a, b) => (b.createdAt?.toDate() || 0) - (a.createdAt?.toDate() || 0));
@@ -273,15 +274,85 @@
                     unsubscribeSettings();
                     unsubscribeEntries();
                 };
-            }, [db, user, userId, showUnpaidOnly, appId]);
+            }, [db, user, userId, appId]);
 
             const filteredEntries = useMemo(() => {
-                return overtimeEntries.filter(entry => {
-                    const dateMatch = !filterDate || (entry.date.split('T')[0] === filterDate);
+                // Primeiro aplicamos os filtros
+                const filtered = overtimeEntries.filter(entry => {
+                    // Filtro por data inicial
+                    const startDateMatch = !filterDate || (entry.date >= filterDate);
+                    
+                    // Filtro por data final
+                    const endDateMatch = !filterEndDate || (entry.date <= filterEndDate);
+                    
+                    // Filtro por texto de pesquisa
                     const searchMatch = !searchQuery || entry.reason.toLowerCase().includes(searchQuery.toLowerCase());
-                    return dateMatch && searchMatch;
+                    
+                    // Filtro por status de pagamento
+                    const paidStatusMatch = !showUnpaidOnly || !entry.isPaid;
+                    
+                    // Filtro por adicional noturno
+                    const nightShiftMatch = !showNightShiftOnly || entry.isNightShift;
+                    
+                    return startDateMatch && endDateMatch && searchMatch && paidStatusMatch && nightShiftMatch;
                 });
-            }, [overtimeEntries, filterDate, searchQuery]);
+                
+                // Depois aplicamos a classificação
+                const sorted = [...filtered].sort((a, b) => {
+                    let valueA, valueB;
+                    
+                    // Determinar os valores a comparar com base no campo de classificação
+                    switch(sortBy) {
+                        case 'date':
+                            valueA = a.date + a.startTime;
+                            valueB = b.date + b.startTime;
+                            break;
+                        case 'duration':
+                            valueA = (a.durationHours * 60) + a.durationMinutes;
+                            valueB = (b.durationHours * 60) + b.durationMinutes;
+                            break;
+                        case 'value':
+                            // Calcular o valor de cada entrada
+                            const hourlyRateValue = hourlyRate || 0;
+                            const aHours = a.durationHours + (a.durationMinutes / 60);
+                            const bHours = b.durationHours + (b.durationMinutes / 60);
+                            
+                            let aValue = aHours * hourlyRateValue;
+                            let bValue = bHours * hourlyRateValue;
+                            
+                            // Aplicar adicional noturno se necessário
+                            if (a.isNightShift) {
+                                const percentage = a.nightlyPercentage || 20;
+                                aValue += aValue * (percentage / 100);
+                            }
+                            
+                            if (b.isNightShift) {
+                                const percentage = b.nightlyPercentage || 20;
+                                bValue += bValue * (percentage / 100);
+                            }
+                            
+                            valueA = aValue;
+                            valueB = bValue;
+                            break;
+                        case 'reason':
+                            valueA = a.reason.toLowerCase();
+                            valueB = b.reason.toLowerCase();
+                            break;
+                        default:
+                            valueA = a.date;
+                            valueB = b.date;
+                    }
+                    
+                    // Aplicar a direção da classificação
+                    if (sortDirection === 'asc') {
+                        return valueA > valueB ? 1 : valueA < valueB ? -1 : 0;
+                    } else {
+                        return valueA < valueB ? 1 : valueA > valueB ? -1 : 0;
+                    }
+                });
+                
+                return sorted;
+            }, [overtimeEntries, filterDate, filterEndDate, searchQuery, showUnpaidOnly, showNightShiftOnly, sortBy, sortDirection, hourlyRate]);
 
             const { totalOvertime, totalValue } = useMemo(() => {
                 const totalMinutes = filteredEntries.reduce((acc, entry) => acc + (entry.durationHours * 60) + entry.durationMinutes, 0);
@@ -340,9 +411,8 @@
                     if (entry.isNightShift) {
                         content += `Adicional Noturno: ${entry.nightlyPercentage || 20}%\n`;
                     }
-                    content += `Valor Estimado: R$ ${entryValue.toFixed(2)}\n`;
-                    content += `Status: ${entry.isPaid ? 'Pago' : 'Não Pago'}\n`;
-                    content += `Registrado em: ${entry.createdAt?.toDate().toLocaleString('pt-BR')}\n\n`;
+                    content += `Valor Estimado: R$ ${entryValue.toFixed(2)}\n\n`;
+                    // Removidas as linhas de status e data de registro conforme solicitado
                 });
                 const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
                 const url = URL.createObjectURL(blob);
@@ -421,7 +491,9 @@
                                         showUnpaidOnly={showUnpaidOnly} 
                                         setShowUnpaidOnly={setShowUnpaidOnly} 
                                         filterDate={filterDate} 
-                                        setFilterDate={setFilterDate} 
+                                        setFilterDate={setFilterDate}
+                                        filterEndDate={filterEndDate}
+                                        setFilterEndDate={setFilterEndDate}
                                         searchQuery={searchQuery} 
                                         setSearchQuery={setSearchQuery} 
                                         hourlyRate={hourlyRate} 
@@ -430,6 +502,12 @@
                                         nightlyPercentage={nightlyPercentage}
                                         setNightlyPercentage={setNightlyPercentage}
                                         updateNightlyPercentageInDb={updateNightlyPercentageInDb}
+                                        sortBy={sortBy}
+                                        setSortBy={setSortBy}
+                                        sortDirection={sortDirection}
+                                        setSortDirection={setSortDirection}
+                                        showNightShiftOnly={showNightShiftOnly}
+                                        setShowNightShiftOnly={setShowNightShiftOnly}
                                     />
                                 )}
                             </div>
@@ -615,7 +693,19 @@
             );
         };
 
-        const FilterControls = ({ showUnpaidOnly, setShowUnpaidOnly, filterDate, setFilterDate, searchQuery, setSearchQuery, hourlyRate, setHourlyRate, updateHourlyRateInDb, nightlyPercentage, setNightlyPercentage, updateNightlyPercentageInDb }) => {
+        const FilterControls = ({ 
+            showUnpaidOnly, setShowUnpaidOnly, 
+            filterDate, setFilterDate, 
+            filterEndDate, setFilterEndDate,
+            searchQuery, setSearchQuery, 
+            hourlyRate, setHourlyRate, 
+            updateHourlyRateInDb, 
+            nightlyPercentage, setNightlyPercentage, 
+            updateNightlyPercentageInDb,
+            sortBy, setSortBy,
+            sortDirection, setSortDirection,
+            showNightShiftOnly, setShowNightShiftOnly
+        }) => {
             // Função simples para lidar com a mudança de taxa horária
             const handleHourlyRateChange = (e) => {
                 const value = e.target.value;
@@ -674,14 +764,80 @@
                         <label htmlFor="searchReason" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Pesquisar Motivo</label>
                         <input type="text" id="searchReason" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Ex: projeto final..." className="form-input" />
                     </div>
-                    <div>
-                        <label htmlFor="filterDate" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Filtrar por Data</label>
-                        <input type="date" id="filterDate" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="form-input" />
+                    <div className="mb-4">
+                        <h3 className="text-md font-semibold text-slate-700 dark:text-slate-200 mb-2">Filtrar por Período</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label htmlFor="filterDate" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Data Inicial</label>
+                                <input type="date" id="filterDate" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="form-input" />
+                            </div>
+                            <div>
+                                <label htmlFor="filterEndDate" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Data Final</label>
+                                <input type="date" id="filterEndDate" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)} className="form-input" />
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex items-center">
-                        <input type="checkbox" id="filterUnpaid" checked={showUnpaidOnly} onChange={(e) => setShowUnpaidOnly(e.target.checked)} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" />
-                        <label htmlFor="filterUnpaid" className="ml-2 block text-sm text-slate-600 dark:text-slate-300">Mostrar somente não pagas</label>
+                    
+                    <div className="mb-4">
+                        <h3 className="text-md font-semibold text-slate-700 dark:text-slate-200 mb-2">Classificação</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label htmlFor="sortBy" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Ordenar por</label>
+                                <select 
+                                    id="sortBy" 
+                                    value={sortBy} 
+                                    onChange={(e) => setSortBy(e.target.value)} 
+                                    className="form-input"
+                                >
+                                    <option value="date">Data</option>
+                                    <option value="duration">Duração</option>
+                                    <option value="value">Valor</option>
+                                    <option value="reason">Motivo</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="sortDirection" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Ordem</label>
+                                <select 
+                                    id="sortDirection" 
+                                    value={sortDirection} 
+                                    onChange={(e) => setSortDirection(e.target.value)} 
+                                    className="form-input"
+                                >
+                                    <option value="asc">Crescente</option>
+                                    <option value="desc">Decrescente</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
+                    
+                    <div className="mb-4">
+                        <h3 className="text-md font-semibold text-slate-700 dark:text-slate-200 mb-2">Filtros</h3>
+                        <div className="space-y-2">
+                            <div className="flex items-center">
+                                <input type="checkbox" id="filterUnpaid" checked={showUnpaidOnly} onChange={(e) => setShowUnpaidOnly(e.target.checked)} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" />
+                                <label htmlFor="filterUnpaid" className="ml-2 block text-sm text-slate-600 dark:text-slate-300">Mostrar somente não pagas</label>
+                            </div>
+                            <div className="flex items-center">
+                                <input type="checkbox" id="filterNightShift" checked={showNightShiftOnly} onChange={(e) => setShowNightShiftOnly(e.target.checked)} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" />
+                                <label htmlFor="filterNightShift" className="ml-2 block text-sm text-slate-600 dark:text-slate-300">Mostrar somente com adicional noturno</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button 
+                        onClick={() => {
+                            setFilterDate('');
+                            setFilterEndDate('');
+                            setSearchQuery('');
+                            setShowUnpaidOnly(false);
+                            setShowNightShiftOnly(false);
+                            setSortBy('date');
+                            setSortDirection('desc');
+                        }} 
+                        className="w-full py-2 px-4 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        Limpar Filtros
+                    </button>
                 </div>
             );
         };

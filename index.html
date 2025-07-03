@@ -13,12 +13,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- React e ReactDOM (via CDN) -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- React e ReactDOM (via CDN) - Versões específicas para garantir compatibilidade -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js"></script>
     
     <!-- Babel (para converter JSX no navegador) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.21.4/babel.min.js"></script>
     
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -213,8 +213,7 @@
             
             const updateNightlyPercentageInDb = async (newPercentage) => {
                 if (!db || !user) return;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userId = user.uid;
+                
                 try {
                     const userSettingsRef = doc(db, `artifacts/${appId}/users/${userId}/user_settings/preferences`);
                     await setDoc(userSettingsRef, { nightlyPercentage: parseFloat(newPercentage) || 20 }, { merge: true });
@@ -234,10 +233,9 @@
             };
             
             useEffect(() => {
-                if (!db || !user) return;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userId = user.uid;
-
+                if (!db || !user || !userId) return;
+                
+                // Usar as variáveis que já extraímos fora do useEffect
                 const userSettingsRef = doc(db, `artifacts/${appId}/users/${userId}/user_settings/preferences`);
                 const unsubscribeSettings = onSnapshot(userSettingsRef, (docSnap) => {
                     if (docSnap.exists()) {
@@ -275,7 +273,7 @@
                     unsubscribeSettings();
                     unsubscribeEntries();
                 };
-            }, [db, user, showUnpaidOnly]);
+            }, [db, user, userId, showUnpaidOnly, appId]);
 
             const filteredEntries = useMemo(() => {
                 return overtimeEntries.filter(entry => {
@@ -356,10 +354,13 @@
                 showMessage("Dados exportados com sucesso!", "success");
             };
 
+            // Extrair valores necessários fora das funções
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const userId = user ? user.uid : null;
+            
             const updateHourlyRateInDb = async (newRate) => {
                 if (!db || !user) return;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userId = user.uid;
+                
                 try {
                     const userSettingsRef = doc(db, `artifacts/${appId}/users/${userId}/user_settings/preferences`);
                     await setDoc(userSettingsRef, { hourlyRate: parseFloat(newRate) || 0 }, { merge: true });
@@ -469,6 +470,15 @@
             // Usar o valor padrão fornecido pelo componente pai
             const [nightlyPercentage, setNightlyPercentage] = useState(defaultNightlyPercentage);
             
+            // Handlers para os eventos de formulário
+            const handleDateChange = (e) => setDate(e.target.value);
+            const handleStartTimeChange = (e) => setStartTime(e.target.value);
+            const handleDurationHoursChange = (e) => setDurationHours(e.target.value);
+            const handleDurationMinutesChange = (e) => setDurationMinutes(e.target.value);
+            const handleReasonChange = (e) => setReason(e.target.value);
+            const handleIsPaidChange = (e) => setIsPaid(e.target.checked);
+            const handleIsNightShiftChange = (e) => setIsNightShift(e.target.checked);
+            
             // Atualizar quando o valor padrão mudar
             useEffect(() => {
                 setNightlyPercentage(defaultNightlyPercentage);
@@ -496,17 +506,19 @@
                 }
             }, [editingEntry]);
 
+            // Extrair valores necessários fora das funções
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const userId = user ? user.uid : null;
+            
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!db || !user) return showMessage("Erro de conexão.", "error");
+                if (!db || !user || !userId) return showMessage("Erro de conexão.", "error");
                 if (!date || !startTime || durationHours === '' || durationMinutes === '' || !reason) {
                     return showMessage("Preencha todos os campos.", "error");
                 }
                 if (isNaN(parseInt(durationHours)) || isNaN(parseInt(durationMinutes)) || parseInt(durationHours) < 0 || parseInt(durationMinutes) < 0 || parseInt(durationMinutes) > 59) {
                     return showMessage("Duração inválida.", "error");
                 }
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userId = user.uid;
                 const dataToSave = {
                     date,
                     startTime,
@@ -549,34 +561,46 @@
                     <h2 className="text-lg font-bold text-slate-800 dark:text-white">{editingEntry ? 'Editar Hora Extra' : 'Adicionar Nova Hora Extra'}</h2>
                     <div>
                         <label htmlFor="date" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Data</label>
-                        <input type="date" id="date" value={date} onChange={(e) => setDate(e.target.value)} required className="form-input" />
+                        <input type="date" id="date" value={date} onChange={handleDateChange} required className="form-input" />
                     </div>
                     <div>
                         <label htmlFor="startTime" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Hora de Início</label>
-                        <input type="time" id="startTime" value={startTime} onChange={(e) => setStartTime(e.target.value)} required className="form-input" />
+                        <input type="time" id="startTime" value={startTime} onChange={handleStartTimeChange} required className="form-input" />
                     </div>
                     <div className="flex space-x-4">
                         <div className="flex-1">
                             <label htmlFor="durationHours" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Horas</label>
-                            <input type="number" id="durationHours" value={durationHours} onChange={(e) => setDurationHours(e.target.value)} min="0" required className="form-input" />
+                            <input type="number" id="durationHours" value={durationHours} onChange={handleDurationHoursChange} min="0" required className="form-input" />
                         </div>
                         <div className="flex-1">
                             <label htmlFor="durationMinutes" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Minutos</label>
-                            <input type="number" id="durationMinutes" value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} min="0" max="59" required className="form-input" />
+                            <input type="number" id="durationMinutes" value={durationMinutes} onChange={handleDurationMinutesChange} min="0" max="59" required className="form-input" />
                         </div>
                     </div>
                     <div>
                         <label htmlFor="reason" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Motivo</label>
-                        <textarea id="reason" value={reason} onChange={(e) => setReason(e.target.value)} rows="3" required className="form-input resize-y"></textarea>
+                        <textarea id="reason" value={reason} onChange={handleReasonChange} rows="3" required className="form-input resize-y"></textarea>
                     </div>
                     <div className="flex items-center mb-2">
-                        <input type="checkbox" id="isNightShift" checked={isNightShift} onChange={(e) => setIsNightShift(e.target.checked)} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" />
+                        <input 
+                            type="checkbox" 
+                            id="isNightShift" 
+                            checked={isNightShift} 
+                            onChange={handleIsNightShiftChange} 
+                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" 
+                        />
                         <label htmlFor="isNightShift" className="ml-2 block text-sm text-slate-600 dark:text-slate-300">
                             Adicional noturno ({nightlyPercentage}%)
                         </label>
                     </div>
                     <div className="flex items-center">
-                        <input type="checkbox" id="isPaid" checked={isPaid} onChange={(e) => setIsPaid(e.target.checked)} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" />
+                        <input 
+                            type="checkbox" 
+                            id="isPaid" 
+                            checked={isPaid} 
+                            onChange={handleIsPaidChange} 
+                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 rounded" 
+                        />
                         <label htmlFor="isPaid" className="ml-2 block text-sm text-slate-600 dark:text-slate-300">Já foi pago?</label>
                     </div>
                     <button type="submit" className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
@@ -592,12 +616,45 @@
         };
 
         const FilterControls = ({ showUnpaidOnly, setShowUnpaidOnly, filterDate, setFilterDate, searchQuery, setSearchQuery, hourlyRate, setHourlyRate, updateHourlyRateInDb, nightlyPercentage, setNightlyPercentage, updateNightlyPercentageInDb }) => {
+            // Função simples para lidar com a mudança de taxa horária
+            const handleHourlyRateChange = (e) => {
+                const value = e.target.value;
+                setHourlyRate(value);
+            };
+            
+            // Função simples para lidar com o blur da taxa horária
+            const handleHourlyRateBlur = (e) => {
+                const value = e.target.value;
+                updateHourlyRateInDb(value);
+            };
+            
+            // Função simples para lidar com a mudança de percentual noturno
+            const handleNightlyPercentageChange = (e) => {
+                const value = e.target.value;
+                setNightlyPercentage(value);
+            };
+            
+            // Função simples para lidar com o blur do percentual noturno
+            const handleNightlyPercentageBlur = (e) => {
+                const value = e.target.value;
+                updateNightlyPercentageInDb(value);
+            };
+            
             return (
                 <div className="space-y-4">
                     <h2 className="text-lg font-bold text-slate-800 dark:text-white">Opções e Filtros</h2>
                      <div>
                         <label htmlFor="hourlyRate" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Taxa Horária (R$)</label>
-                        <input type="number" id="hourlyRate" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} onBlur={(e) => updateHourlyRateInDb(e.target.value)} step="0.01" min="0" className="form-input" />
+                        <input 
+                            type="number" 
+                            id="hourlyRate" 
+                            value={hourlyRate} 
+                            onChange={handleHourlyRateChange} 
+                            onBlur={handleHourlyRateBlur} 
+                            step="0.01" 
+                            min="0" 
+                            className="form-input" 
+                        />
                     </div>
                     <div>
                         <label htmlFor="nightlyPercentage" className="block text-sm font-medium text-slate-600 dark:text-slate-300">Adicional Noturno (%)</label>
@@ -605,8 +662,8 @@
                             type="number" 
                             id="nightlyPercentage" 
                             value={nightlyPercentage} 
-                            onChange={(e) => setNightlyPercentage(e.target.value)} 
-                            onBlur={(e) => updateNightlyPercentageInDb(e.target.value)} 
+                            onChange={handleNightlyPercentageChange} 
+                            onBlur={handleNightlyPercentageBlur} 
                             step="1" 
                             min="0" 
                             max="100" 
@@ -630,6 +687,7 @@
         };
 
         const OvertimeList = ({ overtimeEntries, showMessage, setEditingEntry, setActiveTab }) => {
+            const { db, user } = useContext(FirebaseContext);
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [entryToDelete, setEntryToDelete] = useState(null);
 
@@ -640,7 +698,9 @@
 
             const handleConfirmDelete = async () => {
                 if (!entryToDelete) return;
-                const { db, user } = useContext(FirebaseContext);
+                
+                // Não use useContext dentro de uma função normal
+                // Em vez disso, use a referência que já capturamos no componente
                 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 if (!db || !user) return showMessage("Erro de conexão.", "error");
                 const userId = user.uid;
@@ -678,11 +738,14 @@
 
         const OvertimeItem = ({ entry, showMessage, setEditingEntry, setActiveTab, onDeleteClick }) => {
             const { db, user } = useContext(FirebaseContext);
+            
+            // Extrair valores necessários fora da função de evento
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const userId = user ? user.uid : null;
 
             const togglePaidStatus = async () => {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 if (!db || !user) return showMessage("Erro de conexão.", "error");
-                const userId = user.uid;
+                
                 try {
                     const entryRef = doc(db, `artifacts/${appId}/users/${userId}/overtime_entries`, entry.id);
                     await updateDoc(entryRef, { isPaid: !entry.isPaid });
@@ -798,10 +861,29 @@
 
         // --- Fim do seu código React ---
 
-        // Renderizar a aplicação no elemento 'root'
+        // Renderizar a aplicação no elemento 'root' usando a API do React 18
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
-        root.render(<AppWithStyles />);
+        
+        // Envolver em um try-catch para capturar erros de renderização
+        try {
+            root.render(
+                // StrictMode ajuda a identificar problemas no código
+                <React.StrictMode>
+                    <AppWithStyles />
+                </React.StrictMode>
+            );
+        } catch (error) {
+            console.error("Erro ao renderizar o aplicativo:", error);
+            // Mostrar uma mensagem de erro amigável no DOM
+            container.innerHTML = `
+                <div style="text-align: center; margin-top: 50px; font-family: Arial, sans-serif;">
+                    <h2>Erro ao carregar o aplicativo</h2>
+                    <p>Ocorreu um erro ao inicializar o aplicativo. Por favor, verifique o console para mais detalhes.</p>
+                    <p style="color: red;">${error.message}</p>
+                </div>
+            `;
+        }
 
     </script>
 
